@@ -1,5 +1,6 @@
 import 'task_item.dart';
 import 'note_item.dart';
+import 'academic_schedule.dart';
 
 class Subject {
   static const _unchanged = Object();
@@ -14,6 +15,9 @@ class Subject {
   final bool isArchived;
   final List<TaskItem> tasks;
   final List<NoteItem> notes;
+  final String semester;
+  final MentariSchedule? mentari;
+  final List<ExamBreak> examBreaks;
 
   Subject({
     required this.id,
@@ -27,6 +31,9 @@ class Subject {
     this.isArchived = false,
     List<TaskItem>? tasks,
     List<NoteItem>? notes,
+    this.semester = '',
+    this.mentari,
+    this.examBreaks = const [],
   }) : createdAt = createdAt ?? DateTime.now(),
        tasks = tasks ?? [],
        notes = notes ?? [];
@@ -58,6 +65,9 @@ class Subject {
     bool? isArchived,
     List<TaskItem>? tasks,
     List<NoteItem>? notes,
+    String? semester,
+    Object? mentari = _unchanged,
+    List<ExamBreak>? examBreaks,
   }) {
     return Subject(
       id: id ?? this.id,
@@ -77,6 +87,11 @@ class Subject {
       isArchived: isArchived ?? this.isArchived,
       tasks: tasks ?? List.from(this.tasks),
       notes: notes ?? List.from(this.notes),
+      semester: semester ?? this.semester,
+      mentari: identical(mentari, _unchanged)
+          ? this.mentari
+          : mentari as MentariSchedule?,
+      examBreaks: examBreaks ?? this.examBreaks,
     );
   }
 
@@ -93,6 +108,9 @@ class Subject {
       'isArchived': isArchived,
       'tasks': tasks.map((t) => t.toJson()).toList(),
       'notes': notes.map((n) => n.toJson()).toList(),
+      'semester': semester,
+      'mentari': mentari?.toJson(),
+      'examBreaks': examBreaks.map((b) => b.toJson()).toList(),
     };
   }
 
@@ -109,6 +127,13 @@ class Subject {
       room: json['room'] as String?,
       lecturer: json['lecturer'] as String?,
       isArchived: json['isArchived'] as bool? ?? false,
+      semester: json['semester'] as String? ?? '',
+      mentari: json['mentari'] == null
+          ? null
+          : MentariSchedule.fromJson(json['mentari'] as Map<String, dynamic>),
+      examBreaks: (json['examBreaks'] as List? ?? [])
+          .map((e) => ExamBreak.fromJson(e as Map<String, dynamic>))
+          .toList(),
       tasks:
           (json['tasks'] as List<dynamic>?)
               ?.map((t) => TaskItem.fromJson(t as Map<String, dynamic>))

@@ -3,9 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
-import '../models/task_item.dart';
 import '../models/subject.dart';
-import '../utils/deadline_helper.dart';
+import '../models/tuition_payment.dart';
+import 'reminder_plan.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -17,6 +17,7 @@ class NotificationService {
 
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
+  final opened = ValueNotifier<String?>(null);
 
   bool get _isSupportedPlatform {
     if (kIsWeb) return false;
@@ -60,9 +61,14 @@ class NotificationService {
       await _notificationsPlugin.initialize(
         settings: initSettings,
         onDidReceiveNotificationResponse: (NotificationResponse response) {
-          debugPrint('Notification clicked with payload: ${response.payload}');
+          opened.value = response.payload;
         },
       );
+      final launch = await _notificationsPlugin
+          .getNotificationAppLaunchDetails();
+      if (launch?.didNotificationLaunchApp == true) {
+        opened.value = launch?.notificationResponse?.payload;
+      }
 
       // Buat Android Notification Channel dengan prioritas tinggi
       if (Platform.isAndroid) {
@@ -167,102 +173,57 @@ class NotificationService {
     );
   }
 
-  /// Jadwalkan pengingat deadline untuk tugas kuliah dengan logo aplikasi
-  Future<void> scheduleTaskDeadlineReminder({
-    required Subject subject,
-    required TaskItem task,
+  Future<void> syncSubjects(
+    List<Subject> subjects, {
+    List<TuitionPayment> payments = const [],
   }) async {
     if (!_isInitialized) await init();
     if (!_isSupportedPlatform) return;
-
-    if (task.deadline == null || task.deadline!.trim().isEmpty || task.isDone) {
-      // Batalkan jika tugas selesai atau deadline kosong
-      await cancelTaskReminder(task.id);
-      return;
+    final plan = planReminders(subjects, DateTime.now(), payments: payments);
+    final used = <int>{};
+    final scheduled = <int, PlannedReminder>{};
+    // Android vendors may cap AlarmManager at 500 alarms; reserve room for system notifications.
+    for (final reminder in plan.take(450)) {
+      var id = _generateNotificationId(reminder.key);
+      while (!used.add(id)) {
+        id = (id + 1) & 0x7FFFFFFF;
+      }
+      scheduled[id] = reminder;
     }
-
-    await cancelTaskReminder(task.id);
-    final date = DeadlineHelper.parseDate(task.deadline!);
-    if (date == null) return;
-
-    // Jadwalkan pengingat pada jam 08:00 pagi di hari deadline
-    var scheduledDate = DateTime(date.year, date.month, date.day, 8, 0, 0);
-
-    // Jika jam 08:00 hari ini sudah lewat tapi deadline hari ini, jadwalkan 1 menit dari sekarang
-    final now = DateTime.now();
-    if (scheduledDate.isBefore(now)) {
-      if (date.year == now.year &&
-          date.month == now.month &&
-          date.day == now.day) {
-        scheduledDate = now.add(const Duration(minutes: 1));
-      } else {
-        // Deadline sudah terlewat di masa lalu, tidak perlu jadwal
-        return;
+    for (final pending
+        in await _notificationsPlugin.pendingNotificationRequests()) {
+      if (!scheduled.containsKey(pending.id)) {
+        await _notificationsPlugin.cancel(id: pending.id);
       }
     }
-
-    final id = _generateNotificationId(task.id);
-
-    final androidDetails = AndroidNotificationDetails(
-      channelId,
-      channelName,
-      channelDescription: channelDescription,
-      importance: Importance.max,
-      priority: Priority.high,
-      icon: 'ic_notification',
-      playSound: true,
-      enableVibration: true,
+    const details = NotificationDetails(
+      android: AndroidNotificationDetails(
+        channelId,
+        channelName,
+        channelDescription: channelDescription,
+        importance: Importance.high,
+        priority: Priority.high,
+        icon: 'ic_notification',
+      ),
+      iOS: DarwinNotificationDetails(),
     );
-
-    const iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
-    );
-
-    final details = NotificationDetails(
-      android: androidDetails,
-      iOS: iosDetails,
-    );
-
-    final tzDateTime = tz.TZDateTime.from(scheduledDate, tz.local);
-
-    try {
+    for (final entry in scheduled.entries) {
+      final reminder = entry.value;
       await _notificationsPlugin.zonedSchedule(
-        id: id,
-        title: '⏰ Deadline Tugas Hari Ini: ${subject.name}',
-        body:
-            'Tugas "${task.title}" harus diselesaikan hari ini (${task.deadline})!',
-        scheduledDate: tzDateTime,
+        id: entry.key,
+        title: reminder.title,
+        body: reminder.body,
+        scheduledDate: tz.TZDateTime.from(reminder.at, tz.local),
         notificationDetails: details,
+        payload: reminder.payload,
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       );
-      debugPrint(
-        'Scheduled notification for task "${task.title}" at $scheduledDate (id: $id)',
-      );
-    } catch (e) {
-      debugPrint('Error scheduling notification: $e');
-      rethrow;
     }
-  }
-
-  /// Batalkan notifikasi spesifik tugas
-  Future<void> cancelTaskReminder(String taskId) async {
-    if (!_isSupportedPlatform) return;
-    final id = _generateNotificationId(taskId);
-    await _notificationsPlugin.cancel(id: id);
-  }
-
-  /// Batalkan seluruh notifikasi terjadwal
-  Future<void> cancelAll() async {
-    if (!_isSupportedPlatform) return;
-    await _notificationsPlugin.cancelAll();
-  }
-
-  Future<void> cancelAllPending() async {
-    if (!_isInitialized) await init();
-    if (!_isSupportedPlatform) return;
-    await _notificationsPlugin.cancelAllPendingNotifications();
+    if (plan.length > 450) {
+      throw StateError(
+        'Batas pengingat HP tercapai. Kurangi jumlah pengingat atau panjang periode Mentari.',
+      );
+    }
   }
 
   /// Generator ID integer unik berbasis hashcode taskId

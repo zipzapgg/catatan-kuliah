@@ -1,4 +1,13 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'package:intl/intl.dart';
+import '../models/academic_schedule.dart';
+import '../services/notification_service.dart';
+import 'widgets/calendar_panel.dart';
+import 'document_import_screen.dart';
+import 'widgets/payments_sheet.dart';
+import 'widgets/mentari_card.dart';
+import 'task_detail_screen.dart';
 import 'package:flutter/services.dart';
 import '../models/subject.dart';
 import '../models/task_item.dart';
@@ -15,7 +24,12 @@ import 'widgets/task_tile.dart';
 
 class DashboardScreen extends StatefulWidget {
   final AppProvider provider;
-  const DashboardScreen({super.key, required this.provider});
+  final int initialTab;
+  const DashboardScreen({
+    super.key,
+    required this.provider,
+    this.initialTab = 0,
+  });
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
@@ -27,11 +41,64 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final _taskSearch = TextEditingController();
   final _subjectSearch = TextEditingController();
   AppProvider get provider => widget.provider;
+  @override
+  void initState() {
+    super.initState();
+    _tab = widget.initialTab;
+    NotificationService().opened.addListener(_notification);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _notification());
+  }
+
+  Future<void> _notification() async {
+    final service = NotificationService();
+    final payload = service.opened.value;
+    if (payload == null) return;
+    service.opened.value = null;
+    await provider.waitUntilReady();
+    if (!mounted) return;
+    try {
+      final data = jsonDecode(payload) as Map<String, dynamic>;
+      if (data['payment'] is String) {
+        final payment = provider.payments
+            .where((p) => p.id == data['payment'])
+            .firstOrNull;
+        if (payment != null) {
+          provider.setSemester(payment.semester);
+          await PaymentsSheet.show(context, provider);
+        }
+        return;
+      }
+      final subject = provider.getSubjectById(data['subject'] as String);
+      if (subject == null) return;
+      final task = subject.tasks.where((t) => t.id == data['task']).firstOrNull;
+      if (task != null) {
+        _openTask(subject, task);
+      } else {
+        _openSubject(subject);
+      }
+    } on FormatException {
+      return;
+    } on TypeError {
+      return;
+    }
+  }
+
+  void _openTask(Subject subject, TaskItem task) => Navigator.push(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => TaskDetailScreen(
+        provider: provider,
+        subjectId: subject.id,
+        taskId: task.id,
+      ),
+    ),
+  );
 
   @override
   void dispose() {
     _taskSearch.dispose();
     _subjectSearch.dispose();
+    NotificationService().opened.removeListener(_notification);
     super.dispose();
   }
 
@@ -55,6 +122,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               scheduleTime: data['scheduleTime'] as String?,
               room: data['room'] as String?,
               lecturer: data['lecturer'] as String?,
+              semester: data['semester'] as String,
+              mentari: data['mentari'],
             )
           : provider.updateSubject(
               subject.id,
@@ -64,6 +133,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
               newScheduleTime: data['scheduleTime'] as String?,
               newRoom: data['room'] as String?,
               newLecturer: data['lecturer'] as String?,
+              newSemester: data['semester'] as String,
+              newMentari: data['mentari'],
             ),
     );
   }
@@ -79,6 +150,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               deadline: data['deadline'] as String?,
               priority: data['priority'] as String,
               subTasks: data['subTasks'] as List<SubTask>,
+              details: data,
             )
           : provider.updateTask(
               subject.id,
@@ -87,6 +159,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               newDeadline: data['deadline'] as String?,
               newPriority: data['priority'] as String,
               newSubTasks: data['subTasks'] as List<SubTask>,
+              details: data,
             ),
     );
   }
@@ -185,7 +258,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     context,
     () => Clipboard.setData(ClipboardData(text: provider.exportData())),
     success:
-        'Cadangan JSON disalin. Simpan di tempat aman agar bisa dipulihkan.',
+        'Cadangan JSON disalin. Foto/PDF tetap di perangkat ini; tautan ikut dicadangkan.',
   );
 
   Future<void> _import() async {
@@ -206,7 +279,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Pemulihan mengganti semua data saat ini, termasuk arsip. Salin cadangan data saat ini sebelum melanjutkan.',
+                  'Pemulihan mengganti semua data saat ini, termasuk arsip dan bayaran. Cadangan lama yang belum memuat bayaran akan mengosongkan daftar bayaran. Salin cadangan data saat ini sebelum melanjutkan.',
                 ),
                 const SizedBox(height: 20),
                 TextField(
@@ -280,6 +353,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _menu(String value) {
     switch (value) {
+      case 'document':
+        Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => DocumentImportScreen(provider: provider),
+          ),
+        );
       case 'export':
         _export();
       case 'import':
@@ -328,99 +408,296 @@ class _DashboardScreenState extends State<DashboardScreen> {
   );
 
   Widget _focusPanel(List<({TaskItem task, Subject subject})> all) {
-    final pending = all.where((entry) => !entry.task.isDone).toList();
-    final urgent = pending
-        .where((entry) => DeadlineHelper.parse(entry.task.deadline).isUrgent)
+    final pending = all.where((e) => !e.task.isDone).length;
+    final completed = all.length - pending;
+    final urgent = all
+        .where(
+          (e) =>
+              !e.task.isDone && DeadlineHelper.parse(e.task.deadline).isUrgent,
+        )
         .length;
-    final completed = all.length - pending.length;
-    final now = DateTime.now();
-    const days = [
-      'Senin',
-      'Selasa',
-      'Rabu',
-      'Kamis',
-      'Jumat',
-      'Sabtu',
-      'Minggu',
-    ];
-    const months = [
-      'Januari',
-      'Februari',
-      'Maret',
-      'April',
-      'Mei',
-      'Juni',
-      'Juli',
-      'Agustus',
-      'September',
-      'Oktober',
-      'November',
-      'Desember',
-    ];
     return Container(
-      margin: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      padding: const EdgeInsets.all(24),
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+      padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: AppTheme.ink,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(28),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '${days[now.weekday - 1]}, ${now.day} ${months[now.month - 1]}',
-            style: const TextStyle(color: Color(0xFFC0D7CA), fontSize: 13),
+          const Text(
+            'Rencana belajarmu',
+            style: TextStyle(color: Color(0xFFCED0D6), fontSize: 13),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           Text(
-            pending.isEmpty
-                ? 'Ruang untuk bernapas.'
-                : '${pending.length} tugas\nmenunggu langkahmu.',
+            '$pending tugas aktif',
             style: const TextStyle(
-              fontSize: 28,
-              height: 1.16,
+              color: Colors.white,
               fontWeight: FontWeight.w700,
-              letterSpacing: -.5,
-              color: Color(0xFFF6FAF5),
+              fontSize: 30,
+              letterSpacing: -.8,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 6),
           Text(
-            pending.isEmpty
-                ? all.isEmpty
-                      ? 'Tambahkan tugas pertamamu dan susun semester ini.'
-                      : 'Semua tugas aktif sudah selesai. Kerja bagus!'
-                : urgent > 0
-                ? '$urgent tugas mendekati atau melewati deadline.'
-                : 'Mulai satu per satu. Setiap langkah berarti.',
-            style: const TextStyle(
-              fontSize: 14,
-              height: 1.5,
-              color: Color(0xFFE0EBE2),
-            ),
+            urgent > 0
+                ? '$urgent tugas perlu perhatian hari ini.'
+                : pending > 0
+                ? 'Selesaikan satu langkah, lalu lanjutkan.'
+                : 'Semua tugas sudah dituntaskan.',
+            style: const TextStyle(color: Color(0xFFE1E2E6), height: 1.4),
           ),
           if (all.isNotEmpty) ...[
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Semantics(
               label: '$completed dari ${all.length} tugas selesai',
               child: LinearProgressIndicator(
                 value: completed / all.length,
-                minHeight: 5,
+                minHeight: 4,
                 borderRadius: BorderRadius.circular(3),
-                color: const Color(0xFFA5D5B3),
-                backgroundColor: const Color(0xFF3B5B4B),
+                color: Colors.white,
+                backgroundColor: const Color(0xFF45464C),
               ),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
-              '$completed dari ${all.length} tugas selesai',
-              style: const TextStyle(fontSize: 12, color: Color(0xFFC0D7CA)),
+              '$completed dari ${all.length} selesai',
+              style: const TextStyle(color: Color(0xFFCED0D6), fontSize: 12),
             ),
           ],
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: AppTheme.ink,
+                  shape: const StadiumBorder(),
+                ),
+                onPressed: provider.isSaving ? null : _newTask,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Tambah tugas'),
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF292B30),
+                  foregroundColor: Colors.white,
+                  shape: const StadiumBorder(),
+                ),
+                onPressed: () => setState(() => _tab = 2),
+                icon: const Icon(Icons.calendar_today_outlined, size: 18),
+                label: const Text('Kalender'),
+              ),
+            ],
+          ),
         ],
       ),
     );
   }
+
+  List<Widget> _homeSlivers() {
+    final all = provider.getAllTasksWithSubject();
+    final now = DateTime.now();
+    final upcoming = [
+      for (final s in provider.visibleSubjects)
+        if (s.mentari != null)
+          for (final o in s.mentari!.occurrences(
+            from: shiftDays(calendarDay(now), -14),
+            to: shiftDays(now, 14),
+            breaks: s.examBreaks,
+          ))
+            if (!o.isDone) (subject: s, occurrence: o),
+    ]..sort((a, b) => a.occurrence.deadline.compareTo(b.occurrence.deadline));
+    final pending = all.where((e) => !e.task.isDone).take(3).toList();
+    return [
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+          child: Row(
+            children: [
+              const CircleAvatar(
+                backgroundColor: Color(0xFFEDEEF2),
+                foregroundColor: AppTheme.ink,
+                radius: 24,
+                child: Icon(Icons.school_outlined),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      now.hour < 11
+                          ? 'Selamat pagi.'
+                          : now.hour < 15
+                          ? 'Selamat siang.'
+                          : now.hour < 18
+                          ? 'Selamat sore.'
+                          : 'Selamat malam.',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(
+                      DateFormat('EEEE, d MMMM', 'id').format(now),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Aktifkan pengingat',
+                icon: const Icon(Icons.notifications_none_outlined),
+                onPressed: () => _menu('reminders'),
+              ),
+            ],
+          ),
+        ),
+      ),
+      SliverToBoxAdapter(child: _focusPanel(all)),
+      SliverToBoxAdapter(
+        child: Card(
+          margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+          child: ListTile(
+            leading: const Icon(Icons.account_balance_wallet_outlined),
+            title: const Text('Bayaran & cicilan'),
+            subtitle: Text(
+              provider.visiblePayments.isEmpty
+                  ? 'Tanggal bayar dan pengingat angsuran'
+                  : '${provider.visiblePayments.where((p) => !p.isPaid).length} belum ditandai dibayar',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => PaymentsSheet.show(context, provider),
+          ),
+        ),
+      ),
+      SliverToBoxAdapter(
+        child: SectionHeading(
+          title: 'E-learning Mentari',
+          subtitle: 'Pertemuan dan deadline terdekat',
+          action: TextButton(
+            onPressed: () => setState(() => _tab = 2),
+            child: const Text('Lihat semua'),
+          ),
+        ),
+      ),
+      if (upcoming.isEmpty)
+        SliverToBoxAdapter(
+          child: Card(
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    provider.visibleSubjects.any((s) => s.mentari != null)
+                        ? 'Tidak ada Mentari dalam dua minggu ini.'
+                        : 'Atur ritme e-learning-mu.',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Jadwal mingguan atau dua mingguan, dengan jeda otomatis saat UTS dan UAS.',
+                  ),
+                  TextButton.icon(
+                    onPressed: () => setState(() => _tab = 3),
+                    icon: const Icon(Icons.arrow_forward, size: 18),
+                    label: const Text('Atur mata kuliah'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      for (final e in upcoming.take(2))
+        SliverToBoxAdapter(
+          child: MentariCard(
+            subject: e.subject,
+            occurrence: e.occurrence,
+            provider: provider,
+          ),
+        ),
+      SliverToBoxAdapter(
+        child: SectionHeading(
+          title: 'Berikutnya dikerjakan',
+          action: TextButton(
+            onPressed: () => setState(() => _tab = 1),
+            child: const Text('Semua tugas'),
+          ),
+        ),
+      ),
+      if (pending.isEmpty)
+        const SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            child: Text(
+              'Belum ada tugas aktif. Tambahkan dari tombol di atas.',
+            ),
+          ),
+        ),
+      for (final e in pending)
+        SliverToBoxAdapter(
+          child: Card(
+            margin: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 10,
+              ),
+              leading: const Icon(Icons.assignment_outlined),
+              title: Text(e.task.title),
+              subtitle: Text(
+                '${e.subject.name}\n${DeadlineHelper.display(e.task.deadline)}',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _openTask(e.subject, e.task),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  Widget _semesterFilter() => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 2, 20, 10),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: PopupMenuButton<String>(
+        tooltip: 'Pilih semester',
+        onSelected: (v) => provider.setSemester(v == '__all__' ? null : v),
+        itemBuilder: (_) => [
+          const PopupMenuItem(value: '__all__', child: Text('Semua semester')),
+          for (final s in provider.semesters)
+            PopupMenuItem(
+              value: s,
+              child: Text(s.isEmpty ? 'Tanpa semester' : s),
+            ),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.school_outlined, size: 17),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  provider.semester == null
+                      ? 'Semua semester'
+                      : provider.semester!.isEmpty
+                      ? 'Tanpa semester'
+                      : provider.semester!,
+                ),
+              ),
+              const Icon(Icons.expand_more, size: 20),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   List<Widget> _taskSlivers() {
     final all = provider.getAllTasksWithSubject();
@@ -443,7 +720,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       'completed': 'Selesai',
     };
     return [
-      SliverToBoxAdapter(child: _focusPanel(all)),
+      const SliverToBoxAdapter(
+        child: SectionHeading(
+          title: 'Tugasmu',
+          subtitle: 'Satu langkah lebih dekat ke selesai.',
+        ),
+      ),
       SliverToBoxAdapter(
         child: _search(
           _taskSearch,
@@ -538,6 +820,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     provider.toggleSubTask(entry.subject.id, entry.task.id, id),
               ),
               onEdit: () => _taskForm(entry.subject, entry.task),
+              onOpen: () => _openTask(entry.subject, entry.task),
               onDelete: () => AppActions.deleteTask(
                 context,
                 provider,
@@ -565,7 +848,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Semester,\nlebih tertata.',
+                'Mata kuliah',
                 style: Theme.of(context).textTheme.headlineLarge,
               ),
               const SizedBox(height: 10),
@@ -685,129 +968,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ];
   }
 
-  List<Widget> _scheduleSlivers() {
-    final groups = provider.subjectsByDay;
-    const days = [
-      'Senin',
-      'Selasa',
-      'Rabu',
-      'Kamis',
-      'Jumat',
-      'Sabtu',
-      'Minggu',
-    ];
-    final today = days[DateTime.now().weekday - 1];
-    return [
-      SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Ritme minggu ini.',
-                style: Theme.of(context).textTheme.headlineLarge,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Hari ini $today. Susun waktu kuliah dan siapkan tugas sebelum kelas.',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ],
-          ),
-        ),
-      ),
-      if (groups.isEmpty)
-        SliverToBoxAdapter(
-          child: EmptyState(
-            icon: Icons.calendar_month_outlined,
-            title: 'Jadwal masih kosong',
-            message: 'Isi hari dan jam kuliah saat menambahkan mata kuliah.',
-            action: 'Tambah mata kuliah',
-            onAction: provider.isSaving ? null : _subjectForm,
-          ),
-        ),
-      for (final group in groups.entries) ...[
-        SliverToBoxAdapter(
-          child: SectionHeading(
-            title: group.key == today ? '${group.key} · Hari ini' : group.key,
-            subtitle: '${group.value.length} mata kuliah',
-          ),
-        ),
-        SliverList.builder(
-          itemCount: group.value.length,
-          itemBuilder: (_, index) {
-            final subject = group.value[index];
-            final theme = Theme.of(context);
-            return Card(
-              margin: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: () => _openSubject(subject),
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 4,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Color(subject.colorValue),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              subject.scheduleTime?.isNotEmpty == true
-                                  ? subject.scheduleTime!
-                                  : 'Jam belum diatur',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.primary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              subject.name,
-                              style: theme.textTheme.titleMedium,
-                            ),
-                            if (subject.room != null ||
-                                subject.lecturer != null) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                [
-                                  subject.room,
-                                  subject.lecturer,
-                                ].whereType<String>().join(' · '),
-                                style: theme.textTheme.bodySmall,
-                              ),
-                            ],
-                            const SizedBox(height: 8),
-                            Text(
-                              '${subject.pendingTasks} tugas belum selesai',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.chevron_right, size: 20),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
-      ],
-    ];
-  }
-
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: provider,
@@ -838,6 +998,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               tooltip: 'Pengaturan dan cadangan',
               onSelected: _menu,
               itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'document',
+                  enabled:
+                      !provider.isLoading &&
+                      !provider.isSaving &&
+                      !provider.hasLoadError,
+                  child: const Text('Impor PDF / gambar'),
+                ),
+                const PopupMenuDivider(),
                 PopupMenuItem(
                   value: 'export',
                   enabled: !provider.isLoading && !provider.hasLoadError,
@@ -919,10 +1088,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ),
                             ),
                           ),
+                        if (provider.semesters.isNotEmpty)
+                          SliverToBoxAdapter(child: _semesterFilter()),
                         ...switch (_tab) {
-                          0 => _taskSlivers(),
-                          1 => _subjectSlivers(),
-                          _ => _scheduleSlivers(),
+                          0 => _homeSlivers(),
+                          1 => _taskSlivers(),
+                          2 => [
+                            SliverToBoxAdapter(
+                              child: CalendarPanel(provider: provider),
+                            ),
+                          ],
+                          _ => _subjectSlivers(),
                         },
                       ],
                       const SliverToBoxAdapter(child: SizedBox(height: 110)),
@@ -930,41 +1106,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
           ),
         ),
-        floatingActionButton: provider.isLoading || provider.hasLoadError
+        floatingActionButton:
+            provider.isLoading || provider.hasLoadError || _tab == 0
             ? null
             : FloatingActionButton.extended(
-                tooltip: _tab == 0 ? 'Tambah tugas' : 'Tambah mata kuliah',
+                tooltip: _tab == 3 ? 'Tambah mata kuliah' : 'Tambah tugas',
                 onPressed: provider.isSaving
                     ? null
-                    : _tab == 0
-                    ? _newTask
-                    : _subjectForm,
+                    : _tab == 3
+                    ? _subjectForm
+                    : _newTask,
                 icon: const Icon(Icons.add),
-                label: Text(_tab == 0 ? 'Tugas baru' : 'Mata kuliah'),
+                label: Text(_tab == 3 ? 'Mata kuliah' : 'Tugas baru'),
               ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _tab,
-          onDestinationSelected: (value) {
-            FocusScope.of(context).unfocus();
-            setState(() => _tab = value);
-          },
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.checklist_outlined),
-              selectedIcon: Icon(Icons.checklist),
-              label: 'Tugas',
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(36),
+                  child: NavigationBar(
+                    height: MediaQuery.textScalerOf(context).scale(1) > 1.4
+                        ? 106
+                        : 76,
+                    selectedIndex: _tab,
+                    onDestinationSelected: (value) {
+                      FocusScope.of(context).unfocus();
+                      setState(() => _tab = value);
+                    },
+                    destinations: const [
+                      NavigationDestination(
+                        icon: Icon(Icons.home_outlined),
+                        selectedIcon: Icon(Icons.home_rounded),
+                        label: 'Beranda',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.checklist_outlined),
+                        selectedIcon: Icon(Icons.checklist),
+                        label: 'Tugas',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.calendar_month_outlined),
+                        selectedIcon: Icon(Icons.calendar_month),
+                        label: 'Kalender',
+                      ),
+                      NavigationDestination(
+                        icon: Icon(Icons.menu_book_outlined),
+                        selectedIcon: Icon(Icons.menu_book),
+                        label: 'Mata kuliah',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  '© 2026 Ghalbi',
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                    fontSize: 10,
+                    letterSpacing: .3,
+                  ),
+                ),
+              ],
             ),
-            NavigationDestination(
-              icon: Icon(Icons.menu_book_outlined),
-              selectedIcon: Icon(Icons.menu_book),
-              label: 'Mata kuliah',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.calendar_month_outlined),
-              selectedIcon: Icon(Icons.calendar_month),
-              label: 'Jadwal',
-            ),
-          ],
+          ),
         ),
       );
     },

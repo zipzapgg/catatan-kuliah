@@ -2,10 +2,34 @@ import 'package:flutter/material.dart';
 import '../models/subject.dart';
 import '../models/task_item.dart';
 import '../models/note_item.dart';
+import '../models/tuition_payment.dart';
 import '../providers/app_provider.dart';
 import '../services/storage_service.dart';
 
 class AppActions {
+  static Future<void> deletePayment(
+    BuildContext context,
+    AppProvider provider,
+    TuitionPayment payment,
+  ) async {
+    if (!await confirm(
+      context,
+      title: 'Hapus pengingat bayaran?',
+      message: '"${payment.title}" akan dihapus dari catatan aplikasi.',
+    )) {
+      return;
+    }
+    if (!context.mounted) return;
+    if (await run(context, () => provider.deletePayment(payment.id)) &&
+        context.mounted) {
+      _undo(
+        context,
+        'Pengingat bayaran dihapus',
+        () => provider.savePayment(payment),
+      );
+    }
+  }
+
   static Future<bool> run(
     BuildContext context,
     Future<void> Function() action, {

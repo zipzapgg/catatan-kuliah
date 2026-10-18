@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 class AppTheme {
-  static const ink = Color(0xFF153D32);
-  static const accent = Color(0xFF176B50);
+  static const ink = Color(0xFF101113);
+  static const accent = Color(0xFF17181A);
   static const List<Color> subjectColors = [
     Color(0xFF2563EB),
     Color(0xFF059669),
@@ -19,11 +19,11 @@ class AppTheme {
 
   static ThemeData _theme(Brightness brightness) {
     final dark = brightness == Brightness.dark;
-    final background = dark ? const Color(0xFF101C18) : const Color(0xFFF5F5EF);
-    final surface = dark ? const Color(0xFF1A2A23) : Colors.white;
-    final text = dark ? const Color(0xFFECF4EC) : const Color(0xFF1E3028);
-    final muted = dark ? const Color(0xFFB1C3B6) : const Color(0xFF5C6B61);
-    final border = dark ? const Color(0xFF35483D) : const Color(0xFFE1E6DD);
+    final background = dark ? const Color(0xFF101113) : const Color(0xFFFFFFFF);
+    final surface = dark ? const Color(0xFF1C1D20) : Colors.white;
+    final text = dark ? const Color(0xFFF4F4F5) : const Color(0xFF18191B);
+    final muted = dark ? const Color(0xFFB8BBC1) : const Color(0xFF63676F);
+    final border = dark ? const Color(0xFF383A40) : const Color(0xFFE7E7EB);
     final scheme =
         ColorScheme.fromSeed(
           seedColor: accent,
@@ -32,15 +32,15 @@ class AppTheme {
           surface: surface,
           onSurface: text,
           onSurfaceVariant: muted,
-          primary: dark ? const Color(0xFF9FDBB6) : accent,
-          onPrimary: dark ? const Color(0xFF123A27) : Colors.white,
+          primary: dark ? const Color(0xFFF1F1F4) : accent,
+          onPrimary: dark ? const Color(0xFF101113) : Colors.white,
           primaryContainer: dark
-              ? const Color(0xFF284C39)
-              : const Color(0xFFE0EEE2),
-          onPrimaryContainer: dark ? const Color(0xFFDEF6E2) : ink,
+              ? const Color(0xFF303238)
+              : const Color(0xFFEDEEF2),
+          onPrimaryContainer: dark ? const Color(0xFFF4F4F5) : ink,
           surfaceContainerHighest: dark
-              ? const Color(0xFF293C30)
-              : const Color(0xFFEDF0E8),
+              ? const Color(0xFF292B30)
+              : const Color(0xFFF1F2F5),
           outlineVariant: border,
           error: dark ? const Color(0xFFFFB4A9) : const Color(0xFFAC3327),
         );
@@ -127,13 +127,10 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         elevation: 0,
-        color: surface,
+        color: dark ? surface : const Color(0xFFF5F5F7),
         surfaceTintColor: Colors.transparent,
         margin: EdgeInsets.zero,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: border),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
@@ -211,8 +208,15 @@ class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: surface,
-        indicatorColor: scheme.primaryContainer,
+        backgroundColor: dark ? surface : const Color(0xFFF3F3F5),
+        indicatorColor: scheme.primary,
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            color: states.contains(WidgetState.selected)
+                ? scheme.onPrimary
+                : muted,
+          ),
+        ),
         elevation: 0,
         labelTextStyle: WidgetStateProperty.resolveWith(
           (states) => TextStyle(
@@ -228,20 +232,20 @@ class AppTheme {
         ),
       ),
       chipTheme: base.chipTheme.copyWith(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: const StadiumBorder(),
         side: BorderSide(color: border),
         selectedColor: scheme.primaryContainer,
         labelStyle: textTheme.labelLarge,
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: dark ? const Color(0xFFDDEADF) : ink,
+        backgroundColor: dark ? const Color(0xFFEDEEF2) : ink,
         behavior: SnackBarBehavior.floating,
         contentTextStyle: TextStyle(
           fontFamily: 'Roboto',
           color: dark ? ink : Colors.white,
         ),
-        actionTextColor: dark ? accent : const Color(0xFFC4EAA0),
+        actionTextColor: dark ? accent : const Color(0xFFD4DEFF),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
       dividerTheme: DividerThemeData(color: border, thickness: 1, space: 1),

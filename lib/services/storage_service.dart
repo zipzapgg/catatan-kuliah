@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/subject.dart';
 import '../models/task_item.dart';
 import '../models/note_item.dart';
+import '../models/tuition_payment.dart';
+import '../models/academic_event.dart';
 
 class StorageException implements Exception {
   final String message;
@@ -41,7 +43,11 @@ class StorageService {
       if (subjects == null) throw const FormatException();
       if ((prefs.getInt(_sampleDataVersionKey) ?? 0) < _sampleDataVersion) {
         final mergedSubjects = _mergeMissingSampleSubjects(subjects);
-        await saveSubjects(mergedSubjects);
+        await saveSubjects(
+          mergedSubjects,
+          payments: importPaymentsFromJson(rawJson),
+          events: importEventsFromJson(rawJson),
+        );
         await prefs.setInt(_sampleDataVersionKey, _sampleDataVersion);
         return mergedSubjects;
       }
@@ -54,10 +60,13 @@ class StorageService {
   }
 
   /// Menyimpan daftar mata kuliah ke SharedPreferences
-  Future<bool> saveSubjects(List<Subject> subjects) async {
+  Future<bool> saveSubjects(
+    List<Subject> subjects, {
+    List<TuitionPayment> payments = const [],
+    List<AcademicEvent> events = const [],
+  }) async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonList = subjects.map((s) => s.toJson()).toList();
-    final encoded = jsonEncode(jsonList);
+    final encoded = exportToJson(subjects, payments: payments, events: events);
     try {
       if (await prefs.setString(_subjectsKey, encoded)) return true;
     } catch (_) {
@@ -69,15 +78,82 @@ class StorageService {
   }
 
   /// Ekspor seluruh data dalam bentuk teks JSON
-  String exportToJson(List<Subject> subjects) {
+  String exportToJson(
+    List<Subject> subjects, {
+    List<TuitionPayment> payments = const [],
+    List<AcademicEvent> events = const [],
+  }) {
     final jsonList = subjects.map((s) => s.toJson()).toList();
-    return jsonEncode(jsonList);
+    return jsonEncode(
+      payments.isEmpty && events.isEmpty
+          ? jsonList
+          : {
+              'version': 2,
+              'subjects': jsonList,
+              'payments': payments.map((p) => p.toJson()).toList(),
+              'events': events.map((e) => e.toJson()).toList(),
+            },
+    );
+  }
+
+  Future<List<TuitionPayment>> loadPayments() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_subjectsKey);
+    return raw == null || raw.trim().isEmpty ? [] : importPaymentsFromJson(raw);
+  }
+
+  Future<List<AcademicEvent>> loadEvents() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_subjectsKey);
+    return raw == null || raw.trim().isEmpty ? [] : importEventsFromJson(raw);
+  }
+
+  List<AcademicEvent> importEventsFromJson(String raw) {
+    final decoded = jsonDecode(raw);
+    if (decoded is List) return [];
+    if (decoded is! Map<String, dynamic> || decoded['version'] != 2) {
+      throw const FormatException('Versi cadangan tidak didukung.');
+    }
+    final events = (decoded['events'] as List? ?? [])
+        .map((e) => AcademicEvent.fromJson(e as Map<String, dynamic>))
+        .toList();
+    if (events.map((e) => e.id).toSet().length != events.length) {
+      throw const FormatException('ID kegiatan ganda.');
+    }
+    final exams = events
+        .where((e) => e.kind != 'event')
+        .map((e) => '${e.semester}:${e.kind}');
+    if (exams.toSet().length != exams.length) {
+      throw const FormatException(
+        'Periode ujian ganda pada semester yang sama.',
+      );
+    }
+    return events;
+  }
+
+  List<TuitionPayment> importPaymentsFromJson(String raw) {
+    final decoded = jsonDecode(raw);
+    if (decoded is List) return [];
+    if (decoded is! Map<String, dynamic> || decoded['version'] != 2) {
+      throw const FormatException('Versi cadangan tidak didukung.');
+    }
+    final payments = (decoded['payments'] as List)
+        .map((p) => TuitionPayment.fromJson(p as Map<String, dynamic>))
+        .toList();
+    if (payments.map((p) => p.id).toSet().length != payments.length) {
+      throw const FormatException('ID bayaran ganda.');
+    }
+    return payments;
   }
 
   /// Impor data dari teks JSON
   List<Subject>? importFromJson(String jsonString) {
     try {
-      final List<dynamic> decoded = jsonDecode(jsonString) as List<dynamic>;
+      final data = jsonDecode(jsonString);
+      importPaymentsFromJson(jsonString);
+      importEventsFromJson(jsonString);
+      final List<dynamic> decoded =
+          (data is List ? data : data['subjects']) as List<dynamic>;
       final subjects = decoded
           .map((item) => Subject.fromJson(item as Map<String, dynamic>))
           .toList();
@@ -85,6 +161,16 @@ class StorageService {
       final taskIds = <String>{};
       final noteIds = <String>{};
       for (final subject in subjects) {
+        subject.mentari?.validate();
+        if (subject.semester.length > 100 ||
+            subject.examBreaks.length > 2 ||
+            subject.examBreaks.map((b) => b.name).toSet().length !=
+                subject.examBreaks.length) {
+          return null;
+        }
+        for (final b in subject.examBreaks) {
+          b.validate();
+        }
         if (subject.id.trim().isEmpty ||
             subject.name.trim().isEmpty ||
             !ids.add(subject.id)) {
@@ -107,6 +193,7 @@ class StorageService {
           return null;
         }
         for (final task in subject.tasks) {
+          task.validate();
           if (task.id.trim().isEmpty ||
               task.title.trim().isEmpty ||
               task.subjectId != subject.id ||

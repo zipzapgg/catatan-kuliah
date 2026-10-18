@@ -14,3 +14,15 @@ android/local.properties
 .env
 .env.*
 !.env.example
+
+# Keep shared binaries and local captures outside source control.
+.playwright-cli/
+*.apk
+*.aab
+*.apks
+*.idsig
+*.zip
+*.mp4
+*.mov
+*.webm
+/screenshot*.png

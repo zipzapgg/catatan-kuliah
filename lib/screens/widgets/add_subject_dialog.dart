@@ -3,6 +3,9 @@ import '../../models/subject.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/app_actions.dart';
 import 'app_widgets.dart';
+import 'schedule_fields.dart';
+import '../../models/academic_schedule.dart';
+import '../../models/unpam_calendar.dart';
 
 class AddSubjectDialog extends StatefulWidget {
   final Subject? initialSubject;
@@ -39,6 +42,8 @@ class _AddSubjectDialogState extends State<AddSubjectDialog> {
   late int _color;
   String? _day;
   bool _saving = false;
+  late final TextEditingController _semester;
+  MentariSchedule? _mentari;
   @override
   void initState() {
     super.initState();
@@ -49,6 +54,14 @@ class _AddSubjectDialogState extends State<AddSubjectDialog> {
     _lecturer = TextEditingController(text: subject?.lecturer);
     _color = subject?.colorValue ?? AppTheme.subjectColors.first.toARGB32();
     _day = subject?.scheduleDay;
+    _semester = TextEditingController(
+      text:
+          subject?.semester ??
+          (UnpamCalendar.isCurrent(DateTime.now())
+              ? UnpamCalendar.semester
+              : ''),
+    );
+    _mentari = subject?.mentari;
   }
 
   @override
@@ -57,11 +70,20 @@ class _AddSubjectDialogState extends State<AddSubjectDialog> {
     _time.dispose();
     _room.dispose();
     _lecturer.dispose();
+    _semester.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     if (_saving || !_formKey.currentState!.validate()) return;
+    try {
+      _mentari?.validate();
+    } on FormatException catch (error) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
     final values = <String, dynamic>{
       'name': _name.text.trim(),
       'colorValue': _color,
@@ -69,6 +91,8 @@ class _AddSubjectDialogState extends State<AddSubjectDialog> {
       'scheduleTime': _time.text.trim(),
       'room': _room.text.trim(),
       'lecturer': _lecturer.text.trim(),
+      'semester': _semester.text.trim(),
+      'mentari': _mentari,
     };
     setState(() => _saving = true);
     final success =
@@ -200,7 +224,7 @@ class _AddSubjectDialogState extends State<AddSubjectDialog> {
             Text('Jadwal kuliah', style: theme.textTheme.titleMedium),
             const SizedBox(height: 4),
             Text(
-              'Opsional. Jadwal akan tampil di tab Jadwal.',
+              'Opsional. Jadwal akan tampil di Kalender.',
               style: theme.textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -259,6 +283,24 @@ class _AddSubjectDialogState extends State<AddSubjectDialog> {
                 labelText: 'Dosen (opsional)',
                 hintText: 'Nama dosen pengampu',
               ),
+            ),
+            const SizedBox(height: 20),
+            TextFormField(
+              controller: _semester,
+              enabled: !_saving,
+              decoration: const InputDecoration(
+                labelText: 'Semester',
+                hintText: 'Mis. 2026/2027 Ganjil',
+              ),
+              maxLength: 100,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 12),
+            MentariEditor(
+              initialValue: widget.initialSubject?.mentari,
+              semester: _semester.text.trim(),
+              enabled: !_saving,
+              onChanged: (value) => _mentari = value,
             ),
             const SizedBox(height: 24),
             SizedBox(

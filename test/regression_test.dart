@@ -148,7 +148,7 @@ Future<void> showApp(
           ).copyWith(textScaler: TextScaler.linear(scale)),
           child: child!,
         ),
-        home: home ?? DashboardScreen(provider: provider),
+        home: home ?? DashboardScreen(provider: provider, initialTab: 1),
       ),
     ),
   );
@@ -528,6 +528,10 @@ void main() {
       expect(find.text('Tugas yang harus tetap tersimpan'), findsOneWidget);
       expect(provider.subjects.single.tasks, hasLength(1));
       SharedPreferencesStorePlatform.instance = store;
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, 'Tambah tugas'),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.widgetWithText(FilledButton, 'Tambah tugas'));
       await tester.pumpAndSettle();
       expect(find.byType(AddTaskDialog), findsNothing);
@@ -553,7 +557,7 @@ void main() {
           final provider = await loadProvider([sample(longText: true)]);
           addTearDown(provider.dispose);
           await showApp(tester, provider, size: size, scale: scale, dark: dark);
-          for (int index = 0; index < 3; index++) {
+          for (int index = 0; index < 4; index++) {
             await tester.tap(find.byType(NavigationDestination).at(index));
             await tester.pumpAndSettle();
             await tester.drag(
@@ -601,6 +605,8 @@ void main() {
           find.byType(SingleChildScrollView).last,
           const Offset(0, -1800),
         );
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byType(FilledButton).last);
         await tester.pumpAndSettle();
         expect(find.byType(FilledButton).last.hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
@@ -741,6 +747,8 @@ void main() {
             )
             .first,
       );
+      await tester.ensureVisible(find.byTooltip('Edit catatan'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Edit catatan'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -886,7 +894,7 @@ void main() {
       ]) {
         await tap(find.widgetWithText(FilterChip, label));
       }
-      await tap(find.byType(NavigationDestination).at(1));
+      await tap(find.byType(NavigationDestination).at(3));
       await tap(find.byTooltip('Urutkan mata kuliah'));
       await tap(
         find.byWidgetPredicate(
@@ -956,7 +964,7 @@ void main() {
     final capture = GlobalKey();
     await showApp(tester, provider, capture: capture);
     await snapshot(tester, capture, 'tugas_light');
-    await tester.tap(find.byType(NavigationDestination).at(1));
+    await tester.tap(find.byType(NavigationDestination).at(3));
     await tester.pumpAndSettle();
     await snapshot(tester, capture, 'mata_kuliah');
     await tester.tap(find.byType(NavigationDestination).at(2));

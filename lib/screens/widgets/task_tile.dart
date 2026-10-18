@@ -13,6 +13,7 @@ class TaskTile extends StatefulWidget {
   final void Function(String subTaskId)? onToggleSubTask;
   final String? subjectName;
   final Color? subjectColor;
+  final VoidCallback? onOpen;
 
   const TaskTile({
     super.key,
@@ -26,6 +27,7 @@ class TaskTile extends StatefulWidget {
     this.onToggleSubTask,
     this.subjectName,
     this.subjectColor,
+    this.onOpen,
   }) : assert(!showDragHandle || dragIndex != null);
 
   @override
@@ -60,7 +62,9 @@ class _TaskTileState extends State<TaskTile> {
     final metadata = <String>[
       if (!task.isDone && task.priority == 'high') 'Prioritas tinggi',
       if (task.deadline != null)
-        '${DeadlineHelper.display(task.deadline)}${!task.isDone && deadline.label.isNotEmpty && deadline.label != task.deadline ? ' · ${deadline.label}' : ''}',
+        '${DeadlineHelper.display(task.deadline)}${task.timeLabel.isEmpty ? '' : ' · ${task.timeLabel}'}${!task.isDone && deadline.label.isNotEmpty && deadline.label != task.deadline ? ' · ${deadline.label}' : ''}',
+      if (task.status != 'todo') TaskItem.statuses[task.status]!,
+      if (task.repeatDays != 0) 'Berulang ${task.repeatDays} hari',
     ];
     return Dismissible(
       key: ValueKey('swipe-${task.id}'),
@@ -197,6 +201,11 @@ class _TaskTileState extends State<TaskTile> {
                     onPressed: disabled ? null : widget.onEdit,
                     icon: const Icon(Icons.edit_outlined, size: 21),
                   ),
+                  if (widget.onOpen != null)
+                    TextButton(
+                      onPressed: disabled ? null : widget.onOpen,
+                      child: const Text('Detail'),
+                    ),
                   IconButton(
                     tooltip: 'Hapus tugas',
                     onPressed: disabled ? null : _delete,

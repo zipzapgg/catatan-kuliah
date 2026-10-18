@@ -11,6 +11,9 @@ import 'widgets/add_note_dialog.dart';
 import 'widgets/app_widgets.dart';
 import 'widgets/task_tile.dart';
 import 'widgets/note_card.dart';
+import 'widgets/mentari_card.dart';
+import '../models/academic_schedule.dart';
+import 'task_detail_screen.dart';
 
 class SubjectDetailScreen extends StatefulWidget {
   final AppProvider provider;
@@ -40,6 +43,8 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
         newScheduleTime: data['scheduleTime'] as String?,
         newRoom: data['room'] as String?,
         newLecturer: data['lecturer'] as String?,
+        newSemester: data['semester'] as String,
+        newMentari: data['mentari'],
       ),
     );
   }
@@ -55,6 +60,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
               deadline: data['deadline'] as String?,
               priority: data['priority'] as String,
               subTasks: data['subTasks'] as List<SubTask>,
+              details: data,
             )
           : provider.updateTask(
               subject.id,
@@ -63,6 +69,7 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
               newDeadline: data['deadline'] as String?,
               newPriority: data['priority'] as String,
               newSubTasks: data['subTasks'] as List<SubTask>,
+              details: data,
             ),
     );
   }
@@ -130,6 +137,11 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
           ),
           const SizedBox(height: 16),
           Text(subject.name, style: theme.textTheme.headlineMedium),
+          if (subject.semester.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(subject.semester, style: theme.textTheme.bodySmall),
+            ),
           if (subject.lecturer != null) ...[
             const SizedBox(height: 8),
             Text(subject.lecturer!, style: theme.textTheme.bodyMedium),
@@ -252,6 +264,16 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
           () => provider.toggleSubTask(subject.id, task.id, id),
         ),
         onEdit: () => _taskForm(subject, task),
+        onOpen: () => Navigator.push(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => TaskDetailScreen(
+              provider: provider,
+              subjectId: subject.id,
+              taskId: task.id,
+            ),
+          ),
+        ),
         onDelete: () => AppActions.deleteTask(context, provider, subject, task),
       );
       return Scaffold(
@@ -310,6 +332,27 @@ class _SubjectDetailScreenState extends State<SubjectDetailScreen> {
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               slivers: [
                 SliverToBoxAdapter(child: _summary(subject)),
+                if (subject.mentari != null) ...[
+                  SliverToBoxAdapter(
+                    child: SectionHeading(
+                      title: 'Mentari',
+                      subtitle:
+                          'Setiap ${subject.mentari!.intervalWeeks == 1 ? 'minggu' : '2 minggu'} · Libur saat UTS/UAS',
+                    ),
+                  ),
+                  for (final occurrence in subject.mentari!.occurrences(
+                    from: shiftDays(calendarDay(DateTime.now()), -28),
+                    to: shiftDays(DateTime.now(), 42),
+                    breaks: subject.examBreaks,
+                  ))
+                    SliverToBoxAdapter(
+                      child: MentariCard(
+                        subject: subject,
+                        occurrence: occurrence,
+                        provider: provider,
+                      ),
+                    ),
+                ],
                 SliverToBoxAdapter(
                   child: SectionHeading(
                     title: 'Tugas',

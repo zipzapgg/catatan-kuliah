@@ -56,6 +56,19 @@ class SubjectCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(subject.name, style: theme.textTheme.titleMedium),
+                        if (subject.semester.isNotEmpty)
+                          Text(
+                            subject.semester,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        if (subject.mentari != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Mentari · ${subject.mentari!.intervalWeeks == 1 ? 'Setiap minggu' : 'Setiap 2 minggu'}',
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ),
                         const SizedBox(height: 4),
                         Text(
                           subject.isArchived
